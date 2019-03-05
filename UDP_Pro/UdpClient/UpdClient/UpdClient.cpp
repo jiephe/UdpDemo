@@ -1,12 +1,9 @@
 #include <windows.h>
 #include <stdio.h>
 #include <string>
-
-#define SERVER_PORT		18000
-
 #pragma comment(lib, "ws2_32.lib")  
 
-//#define _USE_SELECT_
+#define SERVER_PORT		19000
 
 int main()
 {
@@ -29,7 +26,11 @@ int main()
 	struct sockaddr_in ser_addr;
 	memset(&ser_addr, 0x0, sizeof(ser_addr));
 	ser_addr.sin_family = AF_INET;
-	ser_addr.sin_addr.s_addr = inet_addr("192.168.17.128");
+	//for linux 
+	//ser_addr.sin_addr.s_addr = inet_addr("192.168.17.128");
+	
+	//for windows
+	ser_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 	ser_addr.sin_port = htons(SERVER_PORT);
 
 	int snd_size = 1*1024;
@@ -42,7 +43,7 @@ int main()
 
 	int try_count = 0;
 		
-	while (try_count < 1)
+	while (try_count < 100)
 	{
 		int n = sendto(client_fd, (const char*)snd_buffer, snd_size, 0, (struct sockaddr*)&ser_addr, sizeof(ser_addr));
 		if (n < 0)

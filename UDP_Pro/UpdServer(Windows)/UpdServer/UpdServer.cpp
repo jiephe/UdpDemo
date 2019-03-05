@@ -1,9 +1,5 @@
 // UpdServer.cpp : 定义控制台应用程序的入口点。
 //
-
-//size 默认64 要自己设置
-#define FD_SETSIZE	200
-
 #include <windows.h>
 #include <stdio.h>
 #include <string>
@@ -11,71 +7,65 @@
 #include <thread>
 #include <mutex>
 
-#define SERVER_PORT		17000
-
 #pragma comment(lib, "ws2_32.lib")  
 
-//适用于面向多客户端并发
+#define SERVER_PORT				19000
 
 SOCKET							server_fd;
 
-fd_set g_rset;
-std::mutex _mutex;
-
-using MutexLockGuard = std::lock_guard<std::mutex>;
-
-//问题 ： 服务端感知不到断开的upd客户端 无法从fd_set里面清除
-// 导致fd_set 的count达到了上限 其他客户端连接不上来
-void deal_with()
+void do_select()
 {
-	int size = 10 * 1024;
-	char* rcv_buffer = new char[size];
-	char* snd_buffer = new char[size];
+	struct sockaddr_in cliaddr;
+	char rcv_buffer[2048];
+	char snd_buffer[2048];
 
-	FD_ZERO(&g_rset);
+	fd_set rset;
+	FD_ZERO(&rset);
 
-	int deal_count = 0;
+	int count = 0;
 
-	while (1) 
+	while (1)
 	{
-		fd_set rset;
-	
-		{
-			MutexLockGuard lock(_mutex);
-			memcpy(&rset, &g_rset, sizeof(fd_set));
-		}
-
 		timeval timeout;
 		timeout.tv_sec = 0;
-		timeout.tv_usec = 100 * 1000;	// 10 millisecond
+		timeout.tv_usec = 100 * 1000;	// 100 millisecond
+
+		FD_ZERO(&rset);
+		FD_SET(server_fd, &rset);
 
 		int nRet = select(0, &rset, 0, 0, &timeout);
+		if (nRet <= 0)
+			continue;
 
-		for (int i = 0; i < rset.fd_count; ++i)
+		for (u_int i = 0; i < rset.fd_count; ++i)
 		{
-			int n = recv(rset.fd_array[i], rcv_buffer, size, 0);
-			if (n < 0)
+			memset(rcv_buffer, 0x0, sizeof(rcv_buffer));
+			memset(snd_buffer, 0x0, sizeof(snd_buffer));
+
+			int len = sizeof(cliaddr);
+			int n = recvfrom(rset.fd_array[i], rcv_buffer, sizeof(rcv_buffer), 0, (struct sockaddr*)&cliaddr, &len);
+			if (n <= 0)
 			{
-				printf("ERROR in recvfrom\n");
-				continue;
+				printf("recvfrom fail!\n");
 			}
 			rcv_buffer[n] = '\0';
 
 			if (strlen(rcv_buffer) > 0)
 			{
-				sprintf_s(snd_buffer, size, "%s-->%d", rcv_buffer, 100);
-				int n = send(rset.fd_array[i], snd_buffer, strlen(snd_buffer), 0);
-				if (n < 0)
+				sprintf_s(snd_buffer, sizeof(snd_buffer), "%s-%d", rcv_buffer, 100);
+				n = sendto(rset.fd_array[i], snd_buffer, strlen(snd_buffer) + 1, 0, (struct sockaddr*)&cliaddr, sizeof(cliaddr));
+				if (n <= 0)
 				{
-					printf("ERROR in sendto\n");
+					printf("sendto fail!\n");
 				}
 			}
 
-			deal_count++;
+			count++;
 
-			if (deal_count % 100 == 0)
-				printf("deal count : %d\n", deal_count);
+			//printf("deal self: %u count: %d\n", GetCurrentThreadId(), count);
 		}
+
+		FD_CLR(server_fd, &rset);
 	}
 }
 
@@ -111,37 +101,10 @@ int main()
 		return -1;
 	}
 
-	struct sockaddr_in cliaddr;
-	int size = 10*1024;
-	char* rcv_buffer = new char[size];
-	char* snd_buffer = new char[size];
-	int seq = 0;
-
 	printf("\nbegin work ..... \n");
 
-	std::thread* t3 = new std::thread(deal_with);
+	//std::thread t(do_select);
 
-	while (1) {
-		memset(rcv_buffer, 0x0, size);
-		memset(snd_buffer, 0x0, size);
-
-
-		int len = sizeof(cliaddr);
-		int n = recvfrom(server_fd, rcv_buffer, size, 0, (struct sockaddr*)&cliaddr, &len);
-
-		SOCKET peer = socket(AF_INET, SOCK_DGRAM, 0);
-		struct sockaddr_in addr;
-		addr.sin_family = AF_INET;
-		addr.sin_addr.s_addr = htonl(INADDR_ANY);
-		addr.sin_port = htons(0);
-		int ret = bind(peer, (struct sockaddr*)&addr, sizeof(addr));
-		int nret = connect(peer, (struct sockaddr *)&cliaddr, sizeof(struct sockaddr));
-		nret = send(peer, "testt", 5, 0);
-
-		{
-			MutexLockGuard lock(_mutex);
-			FD_SET(peer, &g_rset);
-		}
-	}
+	do_select();
 }
 
